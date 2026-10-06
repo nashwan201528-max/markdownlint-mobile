@@ -1,4 +1,4 @@
-.# markdownlint-mobile
+# markdownlint-mobile
 
 Mobile app for linting Markdown files using markdownlint, packaged for Android via Capacitor.
 
@@ -11,7 +11,7 @@ Mobile app for linting Markdown files using markdownlint, packaged for Android v
 - Package the web app for Android with Capacitor
 
 ## Getting started
-##p
+
 1. Install dependencies:
    ```bash
    npm install
