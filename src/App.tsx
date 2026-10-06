@@ -11,6 +11,8 @@ This is a sample Markdown file.
 > This is a blockquote.
 `;
 
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+
 type MarkdownIssue = {
   lineNumber: number;
   ruleNames: string[];
@@ -19,12 +21,28 @@ type MarkdownIssue = {
   errorContext?: string;
 };
 
+type LintResult = {
+  issues: MarkdownIssue[];
+  error: string | null;
+};
+
 function App() {
-  const [markdown, setMarkdown] = useState(defaultMarkdown);
+  const [markdown, setMarkdown] = useState<string>(() => {
+    if (typeof window === 'undefined') {
+      return defaultMarkdown;
+    }
+
+    try {
+      return window.localStorage.getItem('markdownlint-mobile-content') ?? defaultMarkdown;
+    } catch {
+      return defaultMarkdown;
+    }
+  });
   const [issues, setIssues] = useState<MarkdownIssue[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isLoadingFile, setIsLoadingFile] = useState(false);
 
-  const lintResult = useMemo(() => {
+  const lintResult = useMemo<LintResult>(() => {
     try {
       const result = markdownlint.sync({
         strings: {
@@ -35,26 +53,44 @@ function App() {
           MD013: false,
           MD033: false,
         },
-      }) as Record<string, MarkdownIssue[]>;
+      }) as Record<string, Array<MarkdownIssue>>;
 
       const fileIssues = result['document.md'] ?? [];
-      return fileIssues.map((issue) => ({
-        lineNumber: issue.lineNumber,
-        ruleNames: issue.ruleNames,
-        ruleDescription: issue.ruleDescription,
-        errorDetail: issue.errorDetail,
-        errorContext: issue.errorContext,
-      }));
+      return {
+        issues: fileIssues.map((issue) => ({
+          lineNumber: issue.lineNumber,
+          ruleNames: issue.ruleNames,
+          ruleDescription: issue.ruleDescription,
+          errorDetail: issue.errorDetail,
+          errorContext: issue.errorContext,
+        })),
+        error: null,
+      };
     } catch (lintError) {
-      setError(lintError instanceof Error ? lintError.message : 'Unable to lint the Markdown file.');
-      return [];
+      return {
+        issues: [],
+        error:
+          lintError instanceof Error ? lintError.message : 'Unable to lint the Markdown file.',
+      };
     }
   }, [markdown]);
 
   useEffect(() => {
-    setIssues(lintResult);
-    setError(null);
+    setIssues(lintResult.issues);
+    setError(lintResult.error);
   }, [lintResult]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem('markdownlint-mobile-content', markdown);
+    } catch {
+      // Ignore storage failures so the app still works in private browsing or restricted environments.
+    }
+  }, [markdown]);
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -62,8 +98,24 @@ function App() {
       return;
     }
 
-    const text = await file.text();
-    setMarkdown(text);
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setError(`The selected file is too large. Please use a file smaller than ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB.`);
+      event.target.value = '';
+      return;
+    }
+
+    setIsLoadingFile(true);
+
+    try {
+      const text = await file.text();
+      setMarkdown(text);
+      setError(null);
+    } catch (fileError) {
+      setError(fileError instanceof Error ? fileError.message : 'Unable to read the selected file.');
+    } finally {
+      setIsLoadingFile(false);
+      event.target.value = '';
+    }
   };
 
   return (
@@ -78,6 +130,8 @@ function App() {
           Load file
         </label>
       </header>
+
+      {isLoadingFile && <div className="status info" aria-live="polite">Loading file…</div>}
 
       <section className="panel editor-panel">
         <div className="panel-header">
@@ -100,9 +154,9 @@ function App() {
         </div>
 
         {error ? (
-          <div className="status error">{error}</div>
+          <div className="status error" aria-live="polite">{error}</div>
         ) : issues.length === 0 ? (
-          <div className="status success">No markdownlint issues found.</div>
+          <div className="status success" aria-live="polite">No markdownlint issues found.</div>
         ) : (
           <ul className="issue-list">
             {issues.map((issue, index) => (
